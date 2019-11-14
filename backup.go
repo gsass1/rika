@@ -11,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kennygrant/sanitize"
 	"github.com/pkg/errors"
@@ -37,9 +38,18 @@ type MySQLDefinition struct {
 	Database string `yaml:"database"`
 }
 
+type DumpCommand struct {
+	Program string
+	Args    []string
+}
+
 type Database interface {
 	//GenerateArtifact(destPath string, artifactName *string) error
-	ConstructDumpCommand() *exec.Cmd
+	ConstructDumpCommand() DumpCommand
+}
+
+type DockerDefinition struct {
+	ContainerName string `yaml:"container"`
 }
 
 type DatabaseDefinition struct {
@@ -47,6 +57,7 @@ type DatabaseDefinition struct {
 	Format string `yaml:"format"`
 
 	Database              Database
+	DockerDefinition      *DockerDefinition      `yaml:"docker"`
 	MySQLDefinition       *MySQLDefinition       `yaml:"mysql"`
 	CompressionDefinition *CompressionDefinition `yaml:"compression"`
 }
@@ -292,6 +303,7 @@ func GetFormattedName(name string, format string) string {
 type BackupRunner struct {
 	TempPath string
 	Backup   *Backup
+	Time     time.Time
 }
 
 func NewBackupRunner(Backup *Backup) (*BackupRunner, error) {
@@ -303,15 +315,54 @@ func NewBackupRunner(Backup *Backup) (*BackupRunner, error) {
 	return &BackupRunner{
 		Backup:   Backup,
 		TempPath: tmpPath,
+		Time:     time.Now(),
 	}, nil
 }
 
-func (def *MySQLDefinition) ConstructDumpCommand() *exec.Cmd {
+func (runner *BackupRunner) GetTimestampString() string {
+	return runner.Time.Format("20060102150405")
+}
+func (def *MySQLDefinition) ConstructDumpCommand() DumpCommand {
+	const program = "mysqldump"
+	var args []string
+
 	if len(def.Database) == 0 {
-		return exec.Command("mysqldump", "-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), "--all-databases")
+		args = []string{"-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), "--all-databases"}
+	} else {
+		args = []string{"mysqldump", "-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), def.Database}
 	}
 
-	return exec.Command("mysqldump", "-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), def.Database)
+	return DumpCommand{
+		Program: program,
+		Args:    args,
+	}
+}
+
+func DumpCommandToOSCommand(dumpCmd DumpCommand, def *DatabaseDefinition) *exec.Cmd {
+	if def.DockerDefinition == nil {
+		return exec.Command(dumpCmd.Program, dumpCmd.Args...)
+	} else {
+		// prepend docker command
+		dockerArgs := []string{
+			"exec",
+			"-t",
+			def.DockerDefinition.ContainerName,
+		}
+
+		for _, arg := range dumpCmd.Args {
+			dockerArgs = append(dockerArgs, arg)
+		}
+
+		return exec.Command("docker", dockerArgs...)
+	}
+}
+
+func (runner *BackupRunner) ConstructArtifactName(name, format, filetype, compressionType string) string {
+	if len(format) == 0 {
+		name = DefaultFileFormat(name)
+	}
+
+	return fmt.Sprintf("%s-%s.%s.%s", name, runner.GetTimestampString(), filetype, compressionType)
 }
 
 func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, destPath string) error {
@@ -363,17 +414,19 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 	return compressCmd.Wait()
 }
 
-func GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, artifactName *string) error {
+func (runner *BackupRunner) GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, artifactName *string) error {
 	dumpCmd := def.Database.ConstructDumpCommand()
 
-	fileName := GetFormattedName(def.Name, def.Format) + ".sql." + def.CompressionDefinition.Type
+	fileName := runner.ConstructArtifactName(def.Name, def.Format, "sql", def.CompressionDefinition.Type)
 	*artifactName = fileName
 	fullPath := path.Join(destPath, fileName)
 
-	return RunCommandWithCompressedStdout(dumpCmd, def.CompressionDefinition, fullPath)
+	osCmd := DumpCommandToOSCommand(dumpCmd, def)
+
+	return RunCommandWithCompressedStdout(osCmd, def.CompressionDefinition, fullPath)
 }
 
-func GenerateVolumeArtifact(def *VolumeDefinition, destPath string, artifactName *string) error {
+func (runner *BackupRunner) GenerateVolumeArtifact(def *VolumeDefinition, destPath string, artifactName *string) error {
 	if def.CompressionDefinition.Type == "none" {
 		// Simple tar creation
 		fileName := GetFormattedName(def.Name, def.Format) + ".tar"
@@ -403,7 +456,7 @@ func (runner *BackupRunner) Run() error {
 	for _, db := range runner.Backup.DataProviders.DatabaseDefinitions {
 		var artifactName string
 
-		err := GenerateDatabaseArtifact(db, runner.TempPath, &artifactName)
+		err := runner.GenerateDatabaseArtifact(db, runner.TempPath, &artifactName)
 		if err != nil {
 			return err
 		}
@@ -418,7 +471,7 @@ func (runner *BackupRunner) Run() error {
 	for _, volume := range runner.Backup.DataProviders.VolumeDefinitions {
 		var artifactName string
 
-		err := GenerateVolumeArtifact(volume, runner.TempPath, &artifactName)
+		err := runner.GenerateVolumeArtifact(volume, runner.TempPath, &artifactName)
 		if err != nil {
 			return err
 		}

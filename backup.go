@@ -483,7 +483,7 @@ func (runner *BackupRunner) GenerateDatabaseArtifact(def *DatabaseDefinition, de
 func (runner *BackupRunner) GenerateVolumeArtifact(def *VolumeDefinition, destPath string, artifactName *string) error {
 	if def.CompressionDefinition.Type == "none" {
 		// Simple tar creation
-		fileName := GetFormattedName(def.Name, def.Format) + ".tar"
+		fileName := runner.ConstructArtifactName(def.Name, def.Format, "tar", def.CompressionDefinition.Type)
 		fullPath := path.Join(destPath, fileName)
 		cmd := exec.Command("tar", "cvf", fullPath, def.Path)
 		*artifactName = fileName
@@ -497,7 +497,7 @@ func (runner *BackupRunner) GenerateVolumeArtifact(def *VolumeDefinition, destPa
 	} else {
 		tarCmd := exec.Command("tar", "cvf", "-", def.Path)
 
-		fileName := GetFormattedName(def.Name, def.Format) + ".tar." + def.CompressionDefinition.Type
+		fileName := runner.ConstructArtifactName(def.Name, def.Format, "tar", def.CompressionDefinition.Type)
 		*artifactName = fileName
 		fullPath := path.Join(destPath, fileName)
 
@@ -558,7 +558,7 @@ func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
 
 	cmd := exec.Command("scp", args...)
 
-	fmt.Println(cmd)
+	log.Println(cmd)
 
 	if !GetOptions().DryRun {
 		cmd.Stderr = os.Stderr

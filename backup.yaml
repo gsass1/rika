@@ -19,5 +19,9 @@ backup:
         type: xz
   storageProviders:
   - name: Hetzner
-    local:
-      path: /home/nuke/backups
+    sftp:
+      user: u215873
+      host: u215873.your-storagebox.de
+      path: test
+      port: 23
+      key: /home/nuke/.ssh/id_rsa

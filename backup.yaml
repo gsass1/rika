@@ -1,0 +1,24 @@
+version: 1
+backup:
+  name: Site Backup
+  dataProviders:
+    databases:
+    - name: WordPress Database
+      format: wp-{date}
+      mysql:
+        host: localhost
+        port: 5432
+        user: wordpress
+        password: wordpress
+      compression:
+        type: xz
+        args: -9
+    volumes:
+    - name: WordPress Uploads
+      path: /home/nuke/uploads
+      compression:
+        type: gz
+  storageProviders:
+  - name: Test
+    local:
+      path: /home/nuke/backups

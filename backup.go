@@ -1,0 +1,346 @@
+package main
+
+import (
+	"io/ioutil"
+	"log"
+	"os"
+	"os/exec"
+	"path"
+	"strings"
+
+	"github.com/kennygrant/sanitize"
+	"github.com/pkg/errors"
+	"gopkg.in/yaml.v2"
+)
+
+type CompressionDefinition struct {
+	Type string `yaml:"type"`
+	Args string `yaml:"args"`
+}
+
+func DefaultCompressionDefinition() *CompressionDefinition {
+	return &CompressionDefinition{
+		Type: "gz",
+		Args: "-9",
+	}
+}
+
+type MySQLDefinition struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Database string `yaml:"database"`
+}
+
+type DatabaseDefinition struct {
+	Name   string `yaml:"name"`
+	Format string `yaml:"format"`
+
+	MySQLDefinition       *MySQLDefinition       `yaml:"mysql"`
+	CompressionDefinition *CompressionDefinition `yaml:"compression"`
+}
+
+type VolumeDefinition struct {
+	Name                  string                 `yaml:"name"`
+	Format                string                 `yaml:"format"`
+	Path                  string                 `yaml:"path"`
+	CompressionDefinition *CompressionDefinition `yaml:"compression"`
+}
+
+type DataProviders struct {
+	DatabaseDefinitions []*DatabaseDefinition `yaml:"databases"`
+	VolumeDefinitions   []*VolumeDefinition   `yaml:"volumes"`
+}
+
+type LocalStorageDefinition struct {
+	Format string `yaml:"format"`
+	Path   string `yaml:"path"`
+}
+
+type StorageDefinition struct {
+	Name                   string                  `yaml:"name"`
+	LocalStorageDefinition *LocalStorageDefinition `yaml:"local"`
+}
+
+type Backup struct {
+	Name               string               `yaml:"name"`
+	DataProviders      DataProviders        `yaml:"dataProviders"`
+	StorageDefinitions []*StorageDefinition `yaml:"storageProviders"`
+}
+
+type BackupDefinition struct {
+	Version int    `yaml:"version"`
+	Backup  Backup `yaml:"backup"`
+}
+
+func ParseBackupFile(path string) (*BackupDefinition, error) {
+	file, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, errors.Wrap(err, "reading backup file failed")
+	}
+
+	return ParseBackupFromString(string(file))
+}
+
+func ParseBackupFromString(s string) (*BackupDefinition, error) {
+	var backupDefinition BackupDefinition
+	err := yaml.Unmarshal([]byte(s), &backupDefinition)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid backup file format")
+	}
+
+	return &backupDefinition, nil
+}
+
+const VERSION = 1
+
+func analyzeCompressionDefinition(def *CompressionDefinition) error {
+	// TODO
+	if len(def.Type) == 0 {
+		return errors.New("missing type")
+	}
+
+	return nil
+}
+
+func analyzeMySQLDefinition(def *MySQLDefinition) error {
+	if len(def.Host) == 0 {
+		return errors.New("missing host")
+	}
+
+	if def.Port == 0 {
+		return errors.New("missing port")
+	}
+
+	if len(def.User) == 0 {
+		return errors.New("missing user")
+	}
+
+	if len(def.Password) == 0 {
+		return errors.New("missing password")
+	}
+
+	// NOTE: we do not check Database, because supplying no database means
+	// we will dump the entire MySQL database
+
+	return nil
+}
+
+func analyzeDatabaseDefinition(def *DatabaseDefinition) error {
+	if len(def.Name) == 0 {
+		return errors.New("database definition is missing name")
+	}
+
+	// TODO: parse format
+
+	if def.CompressionDefinition != nil {
+		err := analyzeCompressionDefinition(def.CompressionDefinition)
+		if err != nil {
+			return errors.Wrap(err, "invalid compression definition")
+		}
+	} else {
+		def.CompressionDefinition = DefaultCompressionDefinition()
+	}
+
+	// Only one database must be defined
+	databaseDefined := false
+
+	if def.MySQLDefinition != nil {
+		err := analyzeMySQLDefinition(def.MySQLDefinition)
+		if err != nil {
+			return errors.Wrap(err, "invalid MySQL definition")
+		}
+
+		databaseDefined = true
+	}
+
+	if !databaseDefined {
+		return errors.New("no database specified")
+	}
+
+	return nil
+}
+
+func analyzeVolumeDefinition(def *VolumeDefinition) error {
+	if len(def.Name) == 0 {
+		return errors.New("missing name")
+	}
+
+	if len(def.Path) == 0 {
+		return errors.New("missing path")
+	}
+
+	if _, err := os.Stat(def.Path); err != nil {
+		return errors.Wrapf(err, "could not stat %s", def.Path)
+	}
+
+	if def.CompressionDefinition != nil {
+		err := analyzeCompressionDefinition(def.CompressionDefinition)
+		if err != nil {
+			return errors.Wrap(err, "invalid compression definition")
+		}
+	} else {
+		def.CompressionDefinition = DefaultCompressionDefinition()
+	}
+
+	// TODO: parse format
+
+	return nil
+}
+
+func analyzeLocalStorageDefinition(def *LocalStorageDefinition) error {
+	if len(def.Path) == 0 {
+		return errors.New("missing path")
+	}
+
+	if _, err := os.Stat(def.Path); os.IsNotExist(err) {
+		err := os.MkdirAll(def.Path, os.ModePerm)
+		if err != nil {
+			return errors.Wrap(err, "could not create local storage path")
+		}
+	}
+
+	// TODO: parse format
+
+	return nil
+}
+
+func analyzeStorageDefinition(def *StorageDefinition) error {
+	if len(def.Name) == 0 {
+		return errors.New("missing name")
+	}
+
+	if def.LocalStorageDefinition != nil {
+		err := analyzeLocalStorageDefinition(def.LocalStorageDefinition)
+		if err != nil {
+			return errors.Wrapf(err, "invalid local storage definition")
+		}
+	}
+
+	// TODO: parse more storage definitions
+
+	return nil
+}
+
+func AnalyzeBackupDefinition(def *BackupDefinition) error {
+	if def.Version != VERSION {
+		return errors.New("invalid version")
+	}
+
+	backup := def.Backup
+	if len(backup.Name) == 0 {
+		return errors.New("backup is missing name")
+	}
+
+	if len(backup.DataProviders.DatabaseDefinitions) == 0 && len(backup.DataProviders.VolumeDefinitions) == 0 {
+		return errors.New("you have neither specified a database or a volume: there is nothing to back up!")
+	}
+
+	for _, databaseDefinition := range backup.DataProviders.DatabaseDefinitions {
+		err := analyzeDatabaseDefinition(databaseDefinition)
+		if err != nil {
+			return errors.Wrapf(err, "database '%s' has invalid definition", databaseDefinition.Name)
+		}
+	}
+
+	for _, volumeDefinition := range backup.DataProviders.VolumeDefinitions {
+		err := analyzeVolumeDefinition(volumeDefinition)
+		if err != nil {
+			return errors.Wrapf(err, "volume '%s' has invalid definition", volumeDefinition.Name)
+		}
+	}
+
+	for _, storageDefinition := range backup.StorageDefinitions {
+		err := analyzeStorageDefinition(storageDefinition)
+		if err != nil {
+			return errors.Wrapf(err, "storage '%s' has invalid definition", storageDefinition.Name)
+		}
+	}
+
+	return nil
+}
+
+func DefaultFileFormat(name string) string {
+	s := strings.ToLower(name)
+	s = strings.ReplaceAll(s, " ", "_")
+	s = sanitize.Name(s)
+	return s
+}
+
+func GetFormattedName(name string, format string) string {
+	if len(format) == 0 {
+		return DefaultFileFormat(name)
+	}
+
+	// TODO:
+	return name
+}
+
+type BackupRunner struct {
+	TempPath string
+	Backup   *Backup
+}
+
+func NewBackupRunner(Backup *Backup) (*BackupRunner, error) {
+	tmpPath, err := ioutil.TempDir("/tmp", "rika-backup")
+	if err != nil {
+		return nil, err
+	}
+
+	return &BackupRunner{
+		Backup:   Backup,
+		TempPath: tmpPath,
+	}, nil
+}
+
+func GenerateVolumeArtifact(def *VolumeDefinition, destPath string, dest *string) error {
+	// Simple tar creation
+	fileName := GetFormattedName(def.Name, def.Format) + ".tar"
+	fullPath := path.Join(destPath, fileName)
+
+	cmd := exec.Command("tar", "cvf", fullPath, def.Path)
+	*dest = fileName
+	return cmd.Run()
+}
+
+func (runner *BackupRunner) Run() error {
+	log.Printf("Running backup '%s'\n", runner.Backup.Name)
+	//defer os.RemoveAll(runner.TempPath)
+	var artifacts []string
+
+	log.Println("Generating volume artifacts")
+	for _, volume := range runner.Backup.DataProviders.VolumeDefinitions {
+		var artifactPath string
+
+		err := GenerateVolumeArtifact(volume, runner.TempPath, &artifactPath)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("Generated '%s'\n", artifactPath)
+		artifacts = append(artifacts, artifactPath)
+	}
+
+	// Store artifacts
+	for _, storage := range runner.Backup.StorageDefinitions {
+		log.Printf("Storing artifacts in provider %s", storage.Name)
+		// only local for now
+		local := storage.LocalStorageDefinition
+		if local == nil {
+			continue
+		}
+
+		for _, artifact := range artifacts {
+			artifactFullPath := path.Join(runner.TempPath, artifact)
+			destFullPath := path.Join(local.Path, artifact)
+
+			err := os.Rename(artifactFullPath, destFullPath)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}

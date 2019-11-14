@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -294,32 +296,96 @@ func NewBackupRunner(Backup *Backup) (*BackupRunner, error) {
 	}, nil
 }
 
-func GenerateVolumeArtifact(def *VolumeDefinition, destPath string, dest *string) error {
-	// Simple tar creation
-	fileName := GetFormattedName(def.Name, def.Format) + ".tar"
-	fullPath := path.Join(destPath, fileName)
+func GenerateVolumeArtifact(def *VolumeDefinition, destPath string, artifactName *string) error {
 
-	cmd := exec.Command("tar", "cvf", fullPath, def.Path)
-	*dest = fileName
-	return cmd.Run()
-}
+	if def.CompressionDefinition.Type == "none" {
+		// Simple tar creation
+		fileName := GetFormattedName(def.Name, def.Format) + ".tar"
+		fullPath := path.Join(destPath, fileName)
+		cmd := exec.Command("tar", "cvf", fullPath, def.Path)
+		*artifactName = fileName
+		return cmd.Run()
+	} else {
+		tarCmd := exec.Command("tar", "cvf", "-", def.Path)
+		compressCmd := exec.Command(def.CompressionDefinition.Type, "-z", "--stdout")
 
-func (runner *BackupRunner) Run() error {
-	log.Printf("Running backup '%s'\n", runner.Backup.Name)
-	//defer os.RemoveAll(runner.TempPath)
-	var artifacts []string
+		fileName := GetFormattedName(def.Name, def.Format) + ".tar." + def.CompressionDefinition.Type
+		*artifactName = fileName
+		fullPath := path.Join(destPath, fileName)
 
-	log.Println("Generating volume artifacts")
-	for _, volume := range runner.Backup.DataProviders.VolumeDefinitions {
-		var artifactPath string
-
-		err := GenerateVolumeArtifact(volume, runner.TempPath, &artifactPath)
+		var err error
+		compressCmd.Stdin, err = tarCmd.StdoutPipe()
 		if err != nil {
 			return err
 		}
 
-		log.Printf("Generated '%s'\n", artifactPath)
-		artifacts = append(artifacts, artifactPath)
+		compressStdout, err := compressCmd.StdoutPipe()
+		if err != nil {
+			return err
+		}
+
+		outfile, err := os.Create(fullPath)
+		if err != nil {
+			return err
+		}
+		defer outfile.Close()
+
+		err = compressCmd.Start()
+		if err != nil {
+			return err
+		}
+
+		err = tarCmd.Run()
+		if err != nil {
+			return err
+		}
+
+		fileWriter := bufio.NewWriter(outfile)
+		go io.Copy(fileWriter, compressStdout)
+		defer fileWriter.Flush()
+
+		log.Println(tarCmd)
+		log.Println(compressCmd)
+
+		return compressCmd.Wait()
+	}
+}
+
+func GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, dest *string) error {
+	return errors.New("TODO")
+}
+
+func (runner *BackupRunner) Run() error {
+	log.Printf("Running backup '%s'\n", runner.Backup.Name)
+
+	//defer os.RemoveAll(runner.TempPath)
+
+	var artifacts []string
+
+	// log.Println("Generating database artifacts")
+	// for _, db := range runner.Backup.DataProviders.DatabaseDefinitions {
+	// 	var artifactName string
+
+	// 	err := GenerateDatabaseArtifact(db, runner.TempPath, &artifactName)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+
+	// 	log.Printf("Generated '%s'\n", artifactName)
+	// 	artifacts = append(artifacts, artifactName)
+	// }
+
+	log.Println("Generating volume artifacts")
+	for _, volume := range runner.Backup.DataProviders.VolumeDefinitions {
+		var artifactName string
+
+		err := GenerateVolumeArtifact(volume, runner.TempPath, &artifactName)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("Generated '%s'\n", artifactName)
+		artifacts = append(artifacts, artifactName)
 	}
 
 	// Store artifacts

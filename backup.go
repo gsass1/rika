@@ -418,8 +418,6 @@ func (runner *BackupRunner) ConstructArtifactName(name, format, filetype, compre
 }
 
 func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, destPath string) error {
-	cmd.Stderr = os.Stderr
-
 	args := []string{"-z", "--stdout"}
 
 	for _, additionalArg := range strings.Fields(cdef.Args) {
@@ -427,7 +425,14 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 	}
 
 	compressCmd := exec.Command(cdef.Type, args...)
+	log.Printf("Running '%v' and compressing with '%v'", cmd, compressCmd)
+
+	if GetOptions().DryRun {
+		return nil
+	}
+
 	compressCmd.Stderr = os.Stderr
+	cmd.Stderr = os.Stderr
 
 	var err error
 	compressCmd.Stdin, err = cmd.StdoutPipe()
@@ -445,9 +450,6 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 		return err
 	}
 	defer outfile.Close()
-
-	log.Println(cmd)
-	log.Println(compressCmd)
 
 	err = compressCmd.Start()
 	if err != nil {
@@ -485,7 +487,13 @@ func (runner *BackupRunner) GenerateVolumeArtifact(def *VolumeDefinition, destPa
 		fullPath := path.Join(destPath, fileName)
 		cmd := exec.Command("tar", "cvf", fullPath, def.Path)
 		*artifactName = fileName
-		return cmd.Run()
+		log.Println(cmd)
+
+		if !GetOptions().DryRun {
+			return cmd.Run()
+		}
+
+		return nil
 	} else {
 		tarCmd := exec.Command("tar", "cvf", "-", def.Path)
 
@@ -526,8 +534,14 @@ func (local *LocalStorageDefinition) Store(fullpath string) error {
 	artifact := filepath.Base(fullpath)
 	destFullPath := path.Join(local.Path, artifact)
 
-	_, err := copy(fullpath, destFullPath)
-	return err
+	log.Printf("copying %s to %s\n", fullpath, destFullPath)
+
+	if !GetOptions().DryRun {
+		_, err := copy(fullpath, destFullPath)
+		return err
+	}
+
+	return nil
 }
 
 func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
@@ -545,9 +559,14 @@ func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
 	cmd := exec.Command("scp", args...)
 
 	fmt.Println(cmd)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	return cmd.Run()
+
+	if !GetOptions().DryRun {
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+		return cmd.Run()
+	}
+
+	return nil
 }
 
 func (runner *BackupRunner) Run() error {
@@ -590,7 +609,7 @@ func (runner *BackupRunner) Run() error {
 
 	// Store artifacts
 	for _, storage := range runner.Backup.StorageDefinitions {
-		log.Printf("Storing artifacts in provider %s", storage.Name)
+		log.Printf("Storing artifacts in provider '%s'", storage.Name)
 
 		for _, artifact := range artifacts {
 			artifactFullPath := path.Join(runner.TempPath, artifact)
@@ -601,5 +620,6 @@ func (runner *BackupRunner) Run() error {
 		}
 	}
 
+	log.Printf("Backup '%s' has completed\n", runner.Backup.Name)
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -74,14 +75,29 @@ type DataProviders struct {
 	VolumeDefinitions   []*VolumeDefinition   `yaml:"volumes"`
 }
 
+type Storage interface {
+	Store(filepath string) error
+}
+
 type LocalStorageDefinition struct {
 	Format string `yaml:"format"`
 	Path   string `yaml:"path"`
 }
 
+type SFTPStorageDefinition struct {
+	Format string `yaml:"format"`
+	User   string `yaml:"user"`
+	Host   string `yaml:"host"`
+	Path   string `yaml:"path"`
+	Port   int    `yaml:"port"`
+	Key    string `yaml:"key"`
+}
+
 type StorageDefinition struct {
 	Name                   string                  `yaml:"name"`
 	LocalStorageDefinition *LocalStorageDefinition `yaml:"local"`
+	SFTPStorageDefinition  *SFTPStorageDefinition  `yaml:"sftp"`
+	Storage                Storage
 }
 
 type Backup struct {
@@ -229,16 +245,51 @@ func analyzeLocalStorageDefinition(def *LocalStorageDefinition) error {
 	return nil
 }
 
+func analyzeSFTPStorageDefinition(def *SFTPStorageDefinition) error {
+	if len(def.User) == 0 {
+		return errors.New("missing user")
+	}
+
+	if len(def.Host) == 0 {
+		return errors.New("missing host")
+	}
+
+	if len(def.Path) == 0 {
+		return errors.New("missing remote path")
+	}
+
+	// 	if def.Port == 0 {
+	// 		return errors.New("missing port")
+	// 	}
+
+	if def.Port == 0 {
+		def.Port = 22
+	}
+
+	return nil
+}
+
 func analyzeStorageDefinition(def *StorageDefinition) error {
 	if len(def.Name) == 0 {
 		return errors.New("missing name")
 	}
 
-	if def.LocalStorageDefinition != nil {
+	if def.Storage == nil && def.LocalStorageDefinition != nil {
 		err := analyzeLocalStorageDefinition(def.LocalStorageDefinition)
 		if err != nil {
 			return errors.Wrapf(err, "invalid local storage definition")
 		}
+
+		def.Storage = def.LocalStorageDefinition
+	}
+
+	if def.Storage == nil && def.SFTPStorageDefinition != nil {
+		err := analyzeSFTPStorageDefinition(def.SFTPStorageDefinition)
+		if err != nil {
+			return errors.Wrapf(err, "invalid SFTP storage definition")
+		}
+
+		def.Storage = def.SFTPStorageDefinition
 	}
 
 	// TODO: parse more storage definitions
@@ -329,7 +380,7 @@ func (def *MySQLDefinition) ConstructDumpCommand() DumpCommand {
 	if len(def.Database) == 0 {
 		args = []string{"-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), "--all-databases"}
 	} else {
-		args = []string{"mysqldump", "-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), def.Database}
+		args = []string{"-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), def.Database}
 	}
 
 	return DumpCommand{
@@ -347,6 +398,7 @@ func DumpCommandToOSCommand(dumpCmd DumpCommand, def *DatabaseDefinition) *exec.
 			"exec",
 			"-t",
 			def.DockerDefinition.ContainerName,
+			dumpCmd.Program,
 		}
 
 		for _, arg := range dumpCmd.Args {
@@ -445,10 +497,63 @@ func (runner *BackupRunner) GenerateVolumeArtifact(def *VolumeDefinition, destPa
 	}
 }
 
+func copy(src, dst string) (int64, error) {
+	sourceFileStat, err := os.Stat(src)
+	if err != nil {
+		return 0, err
+	}
+
+	if !sourceFileStat.Mode().IsRegular() {
+		return 0, fmt.Errorf("%s is not a regular file", src)
+	}
+
+	source, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(dst)
+	if err != nil {
+		return 0, err
+	}
+	defer destination.Close()
+	nBytes, err := io.Copy(destination, source)
+	return nBytes, err
+}
+
+func (local *LocalStorageDefinition) Store(fullpath string) error {
+	artifact := filepath.Base(fullpath)
+	destFullPath := path.Join(local.Path, artifact)
+
+	_, err := copy(fullpath, destFullPath)
+	return err
+}
+
+func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
+	artifact := filepath.Base(fullpath)
+
+	var args []string
+
+	if len(sftp.Key) > 0 {
+		args = []string{fmt.Sprintf("-P%d", sftp.Port), "-i", sftp.Key, fullpath, fmt.Sprintf("%s@%s:%s/%s", sftp.User, sftp.Host, sftp.Path, artifact)}
+	} else {
+
+		args = []string{fmt.Sprintf("-P%d", sftp.Port), fullpath, fmt.Sprintf("%s@%s:%s/%s", sftp.User, sftp.Host, sftp.Path, artifact)}
+	}
+
+	cmd := exec.Command("scp", args...)
+
+	fmt.Println(cmd)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	return cmd.Run()
+}
+
 func (runner *BackupRunner) Run() error {
 	log.Printf("Running backup '%s'\n", runner.Backup.Name)
 
-	//defer os.RemoveAll(runner.TempPath)
+	defer os.RemoveAll(runner.TempPath)
 
 	var artifacts []string
 
@@ -486,17 +591,10 @@ func (runner *BackupRunner) Run() error {
 	// Store artifacts
 	for _, storage := range runner.Backup.StorageDefinitions {
 		log.Printf("Storing artifacts in provider %s", storage.Name)
-		// only local for now
-		local := storage.LocalStorageDefinition
-		if local == nil {
-			continue
-		}
 
 		for _, artifact := range artifacts {
 			artifactFullPath := path.Join(runner.TempPath, artifact)
-			destFullPath := path.Join(local.Path, artifact)
-
-			err := os.Rename(artifactFullPath, destFullPath)
+			err := storage.Storage.Store(artifactFullPath)
 			if err != nil {
 				return err
 			}

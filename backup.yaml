@@ -10,8 +10,6 @@ backup:
         user: wordpress
         password: wordpress
         database: wp
-      compression:
-        type: xz
     volumes:
     - name: WordPress Uploads
       path: /home/nuke/uploads

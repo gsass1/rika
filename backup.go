@@ -315,7 +315,16 @@ func (def *MySQLDefinition) ConstructDumpCommand() *exec.Cmd {
 }
 
 func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, destPath string) error {
-	compressCmd := exec.Command(cdef.Type, "-z", "--stdout")
+	cmd.Stderr = os.Stderr
+
+	args := []string{"-z", "--stdout"}
+
+	for _, additionalArg := range strings.Fields(cdef.Args) {
+		args = append(args, additionalArg)
+	}
+
+	compressCmd := exec.Command(cdef.Type, args...)
+	compressCmd.Stderr = os.Stderr
 
 	var err error
 	compressCmd.Stdin, err = cmd.StdoutPipe()
@@ -356,7 +365,6 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 
 func GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, artifactName *string) error {
 	dumpCmd := def.Database.ConstructDumpCommand()
-	dumpCmd.Stderr = os.Stderr
 
 	fileName := GetFormattedName(def.Name, def.Format) + ".sql." + def.CompressionDefinition.Type
 	*artifactName = fileName

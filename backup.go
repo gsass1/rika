@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/kennygrant/sanitize"
@@ -22,7 +24,7 @@ type CompressionDefinition struct {
 
 func DefaultCompressionDefinition() *CompressionDefinition {
 	return &CompressionDefinition{
-		Type: "gz",
+		Type: "xz",
 		Args: "-9",
 	}
 }
@@ -35,10 +37,16 @@ type MySQLDefinition struct {
 	Database string `yaml:"database"`
 }
 
+type Database interface {
+	//GenerateArtifact(destPath string, artifactName *string) error
+	ConstructDumpCommand() *exec.Cmd
+}
+
 type DatabaseDefinition struct {
 	Name   string `yaml:"name"`
 	Format string `yaml:"format"`
 
+	Database              Database
 	MySQLDefinition       *MySQLDefinition       `yaml:"mysql"`
 	CompressionDefinition *CompressionDefinition `yaml:"compression"`
 }
@@ -153,6 +161,8 @@ func analyzeDatabaseDefinition(def *DatabaseDefinition) error {
 		if err != nil {
 			return errors.Wrap(err, "invalid MySQL definition")
 		}
+
+		def.Database = def.MySQLDefinition
 
 		databaseDefined = true
 	}
@@ -296,8 +306,66 @@ func NewBackupRunner(Backup *Backup) (*BackupRunner, error) {
 	}, nil
 }
 
-func GenerateVolumeArtifact(def *VolumeDefinition, destPath string, artifactName *string) error {
+func (def *MySQLDefinition) ConstructDumpCommand() *exec.Cmd {
+	if len(def.Database) == 0 {
+		return exec.Command("mysqldump", "-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), "--all-databases")
+	}
 
+	return exec.Command("mysqldump", "-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), def.Database)
+}
+
+func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, destPath string) error {
+	compressCmd := exec.Command(cdef.Type, "-z", "--stdout")
+
+	var err error
+	compressCmd.Stdin, err = cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	compressStdout, err := compressCmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	outfile, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer outfile.Close()
+
+	log.Println(cmd)
+	log.Println(compressCmd)
+
+	err = compressCmd.Start()
+	if err != nil {
+		return errors.Wrap(err, "failed to run compression cmd")
+	}
+
+	err = cmd.Run()
+	if err != nil {
+		return errors.Wrap(err, "failed to run cmd")
+	}
+
+	fileWriter := bufio.NewWriter(outfile)
+	go io.Copy(fileWriter, compressStdout)
+	defer fileWriter.Flush()
+
+	return compressCmd.Wait()
+}
+
+func GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, artifactName *string) error {
+	dumpCmd := def.Database.ConstructDumpCommand()
+	dumpCmd.Stderr = os.Stderr
+
+	fileName := GetFormattedName(def.Name, def.Format) + ".sql." + def.CompressionDefinition.Type
+	*artifactName = fileName
+	fullPath := path.Join(destPath, fileName)
+
+	return RunCommandWithCompressedStdout(dumpCmd, def.CompressionDefinition, fullPath)
+}
+
+func GenerateVolumeArtifact(def *VolumeDefinition, destPath string, artifactName *string) error {
 	if def.CompressionDefinition.Type == "none" {
 		// Simple tar creation
 		fileName := GetFormattedName(def.Name, def.Format) + ".tar"
@@ -307,52 +375,13 @@ func GenerateVolumeArtifact(def *VolumeDefinition, destPath string, artifactName
 		return cmd.Run()
 	} else {
 		tarCmd := exec.Command("tar", "cvf", "-", def.Path)
-		compressCmd := exec.Command(def.CompressionDefinition.Type, "-z", "--stdout")
 
 		fileName := GetFormattedName(def.Name, def.Format) + ".tar." + def.CompressionDefinition.Type
 		*artifactName = fileName
 		fullPath := path.Join(destPath, fileName)
 
-		var err error
-		compressCmd.Stdin, err = tarCmd.StdoutPipe()
-		if err != nil {
-			return err
-		}
-
-		compressStdout, err := compressCmd.StdoutPipe()
-		if err != nil {
-			return err
-		}
-
-		outfile, err := os.Create(fullPath)
-		if err != nil {
-			return err
-		}
-		defer outfile.Close()
-
-		err = compressCmd.Start()
-		if err != nil {
-			return err
-		}
-
-		err = tarCmd.Run()
-		if err != nil {
-			return err
-		}
-
-		fileWriter := bufio.NewWriter(outfile)
-		go io.Copy(fileWriter, compressStdout)
-		defer fileWriter.Flush()
-
-		log.Println(tarCmd)
-		log.Println(compressCmd)
-
-		return compressCmd.Wait()
+		return RunCommandWithCompressedStdout(tarCmd, def.CompressionDefinition, fullPath)
 	}
-}
-
-func GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, dest *string) error {
-	return errors.New("TODO")
 }
 
 func (runner *BackupRunner) Run() error {
@@ -362,18 +391,20 @@ func (runner *BackupRunner) Run() error {
 
 	var artifacts []string
 
-	// log.Println("Generating database artifacts")
-	// for _, db := range runner.Backup.DataProviders.DatabaseDefinitions {
-	// 	var artifactName string
+	log.Println("Generating database artifacts")
+	for _, db := range runner.Backup.DataProviders.DatabaseDefinitions {
+		var artifactName string
 
-	// 	err := GenerateDatabaseArtifact(db, runner.TempPath, &artifactName)
-	// 	if err != nil {
-	// 		return err
-	// 	}
+		err := GenerateDatabaseArtifact(db, runner.TempPath, &artifactName)
+		if err != nil {
+			return err
+		}
 
-	// 	log.Printf("Generated '%s'\n", artifactName)
-	// 	artifacts = append(artifacts, artifactName)
-	// }
+		log.Printf("Generated '%s'\n", artifactName)
+		if len(artifactName) > 0 {
+			artifacts = append(artifacts, artifactName)
+		}
+	}
 
 	log.Println("Generating volume artifacts")
 	for _, volume := range runner.Backup.DataProviders.VolumeDefinitions {
@@ -385,7 +416,10 @@ func (runner *BackupRunner) Run() error {
 		}
 
 		log.Printf("Generated '%s'\n", artifactName)
-		artifacts = append(artifacts, artifactName)
+		if len(artifactName) > 0 {
+			artifacts = append(artifacts, artifactName)
+
+		}
 	}
 
 	// Store artifacts

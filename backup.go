@@ -211,7 +211,7 @@ func analyzeVolumeDefinition(def *VolumeDefinition) error {
 	}
 
 	if _, err := os.Stat(def.Path); err != nil {
-		return errors.Wrapf(err, "could not stat %s", def.Path)
+		return err
 	}
 
 	if def.CompressionDefinition != nil {

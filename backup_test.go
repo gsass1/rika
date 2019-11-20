@@ -35,13 +35,14 @@ backup:
         user: wordpress
         password: wordpress
       compression:
-        type: xz
+        cmd: xz
         args: -9
     volumes:
     - name: WordPress Uploads
       path: /home/nuke/uploads
       compression:
-        type: gz
+        cmd: gzip
+        ext: gz
   storageProviders:
   - name: Test
     local:

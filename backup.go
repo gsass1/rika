@@ -403,6 +403,7 @@ func NewBackupRunner(Backup *Backup) (*BackupRunner, error) {
 func (runner *BackupRunner) GetTimestampString() string {
 	return runner.Time.Format("20060102150405")
 }
+
 func (def *MySQLDefinition) ConstructDumpCommand() DumpCommand {
 	const program = "mysqldump"
 	var args []string

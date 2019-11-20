@@ -20,14 +20,15 @@ import (
 )
 
 type CompressionDefinition struct {
-	Type string `yaml:"type"`
-	Args string `yaml:"args"`
+	Command   string `yaml:"cmd"`
+	Extension string `yaml:"ext"`
+	Args      string `yaml:"args"`
 }
 
 func DefaultCompressionDefinition() *CompressionDefinition {
 	return &CompressionDefinition{
-		Type: "xz",
-		Args: "-9",
+		Command:   "xz",
+		Extension: "xz",
 	}
 }
 
@@ -132,11 +133,40 @@ func ParseBackupFromString(s string) (*BackupDefinition, error) {
 
 const VERSION = 1
 
+func which(file string) (string, error) {
+	bytes, err := exec.Command("which", file).Output()
+
+	path := string(bytes)
+	path = strings.TrimSuffix(path, "\n")
+
+	return string(path), err
+
+	// 	var stdout bytes.Buffer
+	// 	cmd.Stdout = &stdout
+
+	// 	err := cmd.Run()
+	// 	if err != nil {
+	// 		return "", err
+	// 	}
+}
+
 func analyzeCompressionDefinition(def *CompressionDefinition) error {
 	// TODO
-	if len(def.Type) == 0 {
-		return errors.New("missing type")
+	if len(def.Command) == 0 {
+		return errors.New("missing command")
 	}
+
+	if len(def.Extension) == 0 {
+		def.Extension = def.Command
+	}
+
+	path, err := which(def.Command)
+	if err != nil {
+		// TODO: return stderr
+		return errors.Wrap(err, "could not find executable")
+	}
+
+	def.Command = path
 
 	return nil
 }
@@ -418,13 +448,13 @@ func (runner *BackupRunner) ConstructArtifactName(name, format, filetype, compre
 }
 
 func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, destPath string) error {
-	args := []string{"-z", "--stdout"}
+	args := []string{"--stdout"}
 
 	for _, additionalArg := range strings.Fields(cdef.Args) {
 		args = append(args, additionalArg)
 	}
 
-	compressCmd := exec.Command(cdef.Type, args...)
+	compressCmd := exec.Command(cdef.Command, args...)
 	log.Printf("Running '%v' and compressing with '%v'", cmd, compressCmd)
 
 	if GetOptions().DryRun {
@@ -471,7 +501,7 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 func (runner *BackupRunner) GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, artifactName *string) error {
 	dumpCmd := def.Database.ConstructDumpCommand()
 
-	fileName := runner.ConstructArtifactName(def.Name, def.Format, "sql", def.CompressionDefinition.Type)
+	fileName := runner.ConstructArtifactName(def.Name, def.Format, "sql", def.CompressionDefinition.Extension)
 	*artifactName = fileName
 	fullPath := path.Join(destPath, fileName)
 
@@ -481,9 +511,9 @@ func (runner *BackupRunner) GenerateDatabaseArtifact(def *DatabaseDefinition, de
 }
 
 func (runner *BackupRunner) GenerateVolumeArtifact(def *VolumeDefinition, destPath string, artifactName *string) error {
-	if def.CompressionDefinition.Type == "none" {
+	if def.CompressionDefinition.Command == "none" {
 		// Simple tar creation
-		fileName := runner.ConstructArtifactName(def.Name, def.Format, "tar", def.CompressionDefinition.Type)
+		fileName := runner.ConstructArtifactName(def.Name, def.Format, "tar", def.CompressionDefinition.Extension)
 		fullPath := path.Join(destPath, fileName)
 		cmd := exec.Command("tar", "cvf", fullPath, def.Path)
 		*artifactName = fileName
@@ -497,7 +527,7 @@ func (runner *BackupRunner) GenerateVolumeArtifact(def *VolumeDefinition, destPa
 	} else {
 		tarCmd := exec.Command("tar", "cvf", "-", def.Path)
 
-		fileName := runner.ConstructArtifactName(def.Name, def.Format, "tar", def.CompressionDefinition.Type)
+		fileName := runner.ConstructArtifactName(def.Name, def.Format, "tar", def.CompressionDefinition.Extension)
 		*artifactName = fileName
 		fullPath := path.Join(destPath, fileName)
 
@@ -552,7 +582,6 @@ func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
 	if len(sftp.Key) > 0 {
 		args = []string{fmt.Sprintf("-P%d", sftp.Port), "-i", sftp.Key, fullpath, fmt.Sprintf("%s@%s:%s/%s", sftp.User, sftp.Host, sftp.Path, artifact)}
 	} else {
-
 		args = []string{fmt.Sprintf("-P%d", sftp.Port), fullpath, fmt.Sprintf("%s@%s:%s/%s", sftp.User, sftp.Host, sftp.Path, artifact)}
 	}
 

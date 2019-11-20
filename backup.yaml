@@ -12,11 +12,14 @@ backup:
         user: wordpress
         password: wordpress
         database: wp
+      compression:
+        cmd: gzip
+        ext: gz
     volumes:
     - name: WordPress Uploads
       path: /home/nuke/uploads
       compression:
-        type: xz
+        cmd: xz
   storageProviders:
   - name: Hetzner
     sftp:
@@ -24,4 +27,3 @@ backup:
       host: u215873.your-storagebox.de
       path: test
       port: 23
-      key: /home/nuke/.ssh/id_rsa

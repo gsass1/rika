@@ -409,7 +409,7 @@ type BackupRunner struct {
 }
 
 func NewBackupRunner(Backup *Backup) (*BackupRunner, error) {
-	tmpPath, err := ioutil.TempDir("/tmp", "rika-backup")
+	tmpPath, err := ioutil.TempDir("/tmp", "rika")
 	if err != nil {
 		return nil, err
 	}
@@ -694,7 +694,7 @@ func (runner *BackupRunner) Run() error {
 			artifactFullPath := path.Join(runner.TempPath, artifact)
 			err := storage.Storage.Store(artifactFullPath)
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "failed storing %s", artifact)
 			}
 		}
 

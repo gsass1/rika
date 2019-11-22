@@ -2,8 +2,8 @@ package main
 
 import (
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
-	"log"
 	"os"
 )
 
@@ -59,7 +59,8 @@ func RunCmd(file string) error {
 }
 
 type Options struct {
-	DryRun bool
+	DryRun  bool
+	Verbose bool
 }
 
 var options Options
@@ -69,6 +70,7 @@ func GetOptions() Options {
 }
 
 func main() {
+	log := logrus.New()
 	app := &cli.App{
 		Name:    "rika",
 		Version: "v0.0.1",
@@ -86,6 +88,11 @@ func main() {
 				Usage:       "do not touch anything, only prints commands",
 				Destination: &options.DryRun,
 			},
+			&cli.BoolFlag{
+				Name:        "verbose",
+				Usage:       "increase verbosity",
+				Destination: &options.Verbose,
+			},
 		},
 		Commands: []*cli.Command{
 			{
@@ -95,6 +102,10 @@ func main() {
 				Action: func(c *cli.Context) error {
 					if c.NArg() == 0 {
 						return errors.New("run: expected filename")
+					}
+
+					if options.Verbose {
+						SetVerbose()
 					}
 
 					file := c.Args().Get(0)

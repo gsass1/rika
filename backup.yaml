@@ -27,3 +27,6 @@ backup:
       host: u215873.your-storagebox.de
       path: test
       port: 23
+  - name: Local
+    local:
+      path: /home/nuke/test

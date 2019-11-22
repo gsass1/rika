@@ -3,9 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -17,7 +17,19 @@ import (
 	"github.com/kennygrant/sanitize"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
+
+	"github.com/briandowns/spinner"
 )
+
+var log = logrus.New()
+
+func SetVerbose() {
+	log.SetLevel(logrus.DebugLevel)
+}
+
+func CreateSpinner() *spinner.Spinner {
+	return spinner.New(spinner.CharSets[0], 100*time.Millisecond)
+}
 
 type CompressionDefinition struct {
 	Command   string `yaml:"cmd"`
@@ -33,6 +45,14 @@ func DefaultCompressionDefinition() *CompressionDefinition {
 }
 
 type MySQLDefinition struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Database string `yaml:"database"`
+}
+
+type PostgreSQLDefinition struct {
 	Host     string `yaml:"host"`
 	Port     int    `yaml:"port"`
 	User     string `yaml:"user"`
@@ -61,6 +81,7 @@ type DatabaseDefinition struct {
 	Database              Database
 	DockerDefinition      *DockerDefinition      `yaml:"docker"`
 	MySQLDefinition       *MySQLDefinition       `yaml:"mysql"`
+	PostgreSQLDefinition  *PostgreSQLDefinition  `yaml:"postgres"`
 	CompressionDefinition *CompressionDefinition `yaml:"compression"`
 }
 
@@ -456,14 +477,21 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 	}
 
 	compressCmd := exec.Command(cdef.Command, args...)
-	log.Printf("Running '%v' and compressing with '%v'", cmd, compressCmd)
+
+	log.WithFields(logrus.Fields{
+		"cmd":         cmd,
+		"compressCmd": compressCmd,
+	}).Debug("Running command and compressing")
 
 	if GetOptions().DryRun {
 		return nil
 	}
 
 	compressCmd.Stderr = os.Stderr
-	cmd.Stderr = os.Stderr
+
+	// 	if GetOptions().Verbose {
+	// 		cmd.Stderr = os.Stderr
+	// 	}
 
 	var err error
 	compressCmd.Stdin, err = cmd.StdoutPipe()
@@ -518,7 +546,7 @@ func (runner *BackupRunner) GenerateVolumeArtifact(def *VolumeDefinition, destPa
 		fullPath := path.Join(destPath, fileName)
 		cmd := exec.Command("tar", "cvf", fullPath, def.Path)
 		*artifactName = fileName
-		log.Println(cmd)
+		log.Infoln(cmd)
 
 		if !GetOptions().DryRun {
 			return cmd.Run()
@@ -565,7 +593,7 @@ func (local *LocalStorageDefinition) Store(fullpath string) error {
 	artifact := filepath.Base(fullpath)
 	destFullPath := path.Join(local.Path, artifact)
 
-	log.Printf("copying %s to %s\n", fullpath, destFullPath)
+	//log.Debugf("Local: Copying %s to %s\n", fullpath, destFullPath)
 
 	if !GetOptions().DryRun {
 		_, err := copy(fullpath, destFullPath)
@@ -588,11 +616,13 @@ func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
 
 	cmd := exec.Command("scp", args...)
 
-	log.Println(cmd)
+	//log.Debugln(cmd)
 
 	if !GetOptions().DryRun {
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = os.Stdout
+		// if GetOptions().Verbose {
+		// 	cmd.Stderr = os.Stderr
+		// 	cmd.Stdout = os.Stdout
+		// }
 		return cmd.Run()
 	}
 
@@ -600,13 +630,17 @@ func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
 }
 
 func (runner *BackupRunner) Run() error {
-	log.Printf("Running backup '%s'\n", runner.Backup.Name)
+	log.WithFields(logrus.Fields{
+		"backup": runner.Backup.Name,
+	}).Info("Started backup")
 
 	defer os.RemoveAll(runner.TempPath)
 
 	var artifacts []string
+	spinner := CreateSpinner()
 
-	log.Println("Generating database artifacts")
+	log.Infof("Generating database artifacts ")
+	spinner.Start()
 	for _, db := range runner.Backup.DataProviders.DatabaseDefinitions {
 		var artifactName string
 
@@ -615,13 +649,19 @@ func (runner *BackupRunner) Run() error {
 			return err
 		}
 
-		log.Printf("Generated '%s'\n", artifactName)
+		log.WithFields(logrus.Fields{
+			"name": artifactName,
+		}).Debug("Generated artifact")
+
 		if len(artifactName) > 0 {
 			artifacts = append(artifacts, artifactName)
 		}
 	}
 
-	log.Println("Generating volume artifacts")
+	spinner.Stop()
+
+	log.Info("Generating volume artifacts")
+	spinner.Start()
 	for _, volume := range runner.Backup.DataProviders.VolumeDefinitions {
 		var artifactName string
 
@@ -630,16 +670,25 @@ func (runner *BackupRunner) Run() error {
 			return err
 		}
 
-		log.Printf("Generated '%s'\n", artifactName)
+		log.WithFields(logrus.Fields{
+			"name": artifactName,
+		}).Debug("Generated artifact")
+
 		if len(artifactName) > 0 {
 			artifacts = append(artifacts, artifactName)
 
 		}
 	}
 
+	spinner.Stop()
+
 	// Store artifacts
 	for _, storage := range runner.Backup.StorageDefinitions {
-		log.Printf("Storing artifacts in provider '%s'", storage.Name)
+		log.WithFields(logrus.Fields{
+			"provider": storage.Name,
+		}).Info("Storing artifacts")
+
+		spinner.Start()
 
 		for _, artifact := range artifacts {
 			artifactFullPath := path.Join(runner.TempPath, artifact)
@@ -648,8 +697,13 @@ func (runner *BackupRunner) Run() error {
 				return err
 			}
 		}
+
+		spinner.Stop()
 	}
 
-	log.Printf("Backup '%s' has completed\n", runner.Backup.Name)
+	log.WithFields(logrus.Fields{
+		"backup": runner.Backup.Name,
+	}).Info("Backup has finished")
+
 	return nil
 }

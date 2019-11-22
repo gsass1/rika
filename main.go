@@ -84,11 +84,6 @@ func main() {
 		Usage:     "run simple declarative backups",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name:        "dry-run",
-				Usage:       "do not touch anything, only prints commands",
-				Destination: &options.DryRun,
-			},
-			&cli.BoolFlag{
 				Name:        "verbose",
 				Usage:       "increase verbosity",
 				Destination: &options.Verbose,
@@ -99,6 +94,13 @@ func main() {
 				Name:      "run",
 				Usage:     "runs a backup from a given YAML file",
 				ArgsUsage: "[FILE]",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:        "dry",
+						Usage:       "do not touch anything, only simulate",
+						Destination: &options.DryRun,
+					},
+				},
 				Action: func(c *cli.Context) error {
 					if c.NArg() == 0 {
 						return errors.New("run: expected filename")

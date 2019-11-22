@@ -215,6 +215,38 @@ func analyzeMySQLDefinition(def *MySQLDefinition) error {
 	return nil
 }
 
+func analyzePostgreSQLDefinition(def *PostgreSQLDefinition) error {
+	if len(def.Host) == 0 {
+		return errors.New("missing host")
+	}
+
+	if def.Port == 0 {
+		return errors.New("missing port")
+	}
+
+	if len(def.User) == 0 {
+		return errors.New("missing user")
+	}
+
+	// 	if len(def.Password) == 0 {
+	// 		return errors.New("missing password")
+	// 	}
+
+	// NOTE: we do not check Database, because supplying no database means
+	// we will dump the entire Postgres database
+
+	return nil
+}
+
+func (def *DatabaseDefinition) SetPrimaryDatabase(db Database) error {
+	if def.Database != nil {
+		return errors.New("cannot define multiple databases")
+	}
+
+	def.Database = db
+	return nil
+}
+
 func analyzeDatabaseDefinition(def *DatabaseDefinition) error {
 	if len(def.Name) == 0 {
 		return errors.New("database definition is missing name")
@@ -231,21 +263,25 @@ func analyzeDatabaseDefinition(def *DatabaseDefinition) error {
 		def.CompressionDefinition = DefaultCompressionDefinition()
 	}
 
-	// Only one database must be defined
-	databaseDefined := false
-
 	if def.MySQLDefinition != nil {
 		err := analyzeMySQLDefinition(def.MySQLDefinition)
 		if err != nil {
 			return errors.Wrap(err, "invalid MySQL definition")
 		}
 
-		def.Database = def.MySQLDefinition
-
-		databaseDefined = true
+		def.SetPrimaryDatabase(def.MySQLDefinition)
 	}
 
-	if !databaseDefined {
+	if def.PostgreSQLDefinition != nil {
+		err := analyzePostgreSQLDefinition(def.PostgreSQLDefinition)
+		if err != nil {
+			return errors.Wrap(err, "invalid PostgreSQL definition")
+		}
+
+		def.SetPrimaryDatabase(def.PostgreSQLDefinition)
+	}
+
+	if def.Database == nil {
 		return errors.New("no database specified")
 	}
 
@@ -427,12 +463,37 @@ func (runner *BackupRunner) GetTimestampString() string {
 
 func (def *MySQLDefinition) ConstructDumpCommand() DumpCommand {
 	const program = "mysqldump"
-	var args []string
+
+	args := []string{"-h", def.Host, "-u", def.User, "-P", strconv.Itoa(def.Port)}
+
+	if len(def.Password) > 0 {
+		args = append(args, fmt.Sprintf("--password=%s", def.Password))
+	}
 
 	if len(def.Database) == 0 {
-		args = []string{"-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), "--all-databases"}
+		args = append(args, "--all-databases")
 	} else {
-		args = []string{"-h", def.Host, "-u", def.User, fmt.Sprintf("--password=%s", def.Password), "-P", strconv.Itoa(def.Port), def.Database}
+		args = append(args, def.Database)
+	}
+
+	return DumpCommand{
+		Program: program,
+		Args:    args,
+	}
+}
+
+func (def *PostgreSQLDefinition) ConstructDumpCommand() DumpCommand {
+	var program string
+
+	args := []string{"-h", def.Host, "-U", def.User, "-p", strconv.Itoa(def.Port)}
+
+	// FIXME: no passwords supported
+
+	if len(def.Database) == 0 {
+		program = "pg_dumpall"
+	} else {
+		program = "pg_dump"
+		args = append(args, def.Database)
 	}
 
 	return DumpCommand{
@@ -489,9 +550,10 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 
 	compressCmd.Stderr = os.Stderr
 
-	// 	if GetOptions().Verbose {
-	// 		cmd.Stderr = os.Stderr
-	// 	}
+	if GetOptions().Verbose {
+		cmd.Stderr = os.Stderr
+	}
+	cmd.Stderr = os.Stderr
 
 	var err error
 	compressCmd.Stdin, err = cmd.StdoutPipe()

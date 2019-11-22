@@ -5,13 +5,13 @@ backup:
     databases:
     - name: WordPress Database
       docker:
-        container: test-mariadb
-      mysql:
+        container: test-postgres
+      postgres:
         host: 0.0.0.0
-        port: 3306
-        user: wordpress
-        password: wordpress
-        database: wp
+        port: 5432
+        user: test
+        password: test
+        database: test
       compression:
         cmd: gzip
         ext: gz

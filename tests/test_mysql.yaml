@@ -17,4 +17,4 @@ backup:
   storageProviders:
   - name: Local
     local:
-      path: ./test-mysql
+      path: ./storage

@@ -22,7 +22,7 @@ echo ""
 echo "Creating example database entry"
 docker exec -t test-mysql mysql -u test -ptest test -e "DROP TABLE IF EXISTS test; CREATE TABLE test (test int); INSERT INTO test (test) VALUES(1337);"
 
-rm -rf ./test-mysql
+rm -rf ./storage
 
 echo "Running backup"
 ../rika run test_mysql.yaml
@@ -32,7 +32,7 @@ cleanup() {
     docker rm -f test-mysql 1>/dev/null
 }
 
-DUMPFILE=$(find test-mysql -iname "*.sql.xz" -type f)
+DUMPFILE=$(find storage -iname "*.sql.xz" -type f)
 
 if [ ! -f $DUMPFILE ]; then
     echo "Did not produce a .sql.xz file!"

@@ -25,7 +25,7 @@ docker exec -t test-postgres psql -U test test -c "DROP TABLE IF EXISTS test; CR
 rm -rf ./storage
 
 echo "Running backup"
-../rika run test_postgresql.yaml
+../rika --verbose run test_postgresql.yaml
 
 cleanup() {
     echo "Cleaning up"

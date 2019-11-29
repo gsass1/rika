@@ -32,7 +32,7 @@ echo "Test File 2" > volume/file2
 sleep 2
 
 echo "Running backup"
-../rika run test_scp.yaml
+../rika --verbose run test_scp.yaml
 
 cleanup() {
     echo "Cleaning up"

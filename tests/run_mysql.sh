@@ -25,7 +25,7 @@ docker exec -t test-mysql mysql -u test -ptest test -e "DROP TABLE IF EXISTS tes
 rm -rf ./storage
 
 echo "Running backup"
-../rika run test_mysql.yaml
+../rika --verbose run test_mysql.yaml
 
 cleanup() {
     echo "Cleaning up"

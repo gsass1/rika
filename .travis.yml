@@ -17,5 +17,4 @@ before_script:
   - go build
 
 script:
-  - go test
   - cd tests && ./run_tests.sh

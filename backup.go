@@ -671,9 +671,9 @@ func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
 	var args []string
 
 	if len(sftp.Key) > 0 {
-		args = []string{fmt.Sprintf("-P%d", sftp.Port), "-i", sftp.Key, fullpath, fmt.Sprintf("%s@%s:%s/%s", sftp.User, sftp.Host, sftp.Path, artifact)}
+		args = []string{fmt.Sprintf("-P%d", sftp.Port), "-o", "UserKnownHostsFile /dev/null", "-o", "StrictHostKeyChecking no", "-i", sftp.Key, fullpath, fmt.Sprintf("%s@%s:%s/%s", sftp.User, sftp.Host, sftp.Path, artifact)}
 	} else {
-		args = []string{fmt.Sprintf("-P%d", sftp.Port), fullpath, fmt.Sprintf("%s@%s:%s/%s", sftp.User, sftp.Host, sftp.Path, artifact)}
+		args = []string{fmt.Sprintf("-P%d", sftp.Port), "-o", "UserKnownHostsFile /dev/null", "-o", "StrictHostKeyChecking no", fullpath, fmt.Sprintf("%s@%s:%s/%s", sftp.User, sftp.Host, sftp.Path, artifact)}
 	}
 
 	cmd := exec.Command("scp", args...)
@@ -681,10 +681,10 @@ func (sftp *SFTPStorageDefinition) Store(fullpath string) error {
 	//log.Debugln(cmd)
 
 	if !GetOptions().DryRun {
-		// if GetOptions().Verbose {
-		// 	cmd.Stderr = os.Stderr
-		// 	cmd.Stdout = os.Stdout
-		// }
+		if GetOptions().Verbose {
+			cmd.Stderr = os.Stderr
+			cmd.Stdout = os.Stdout
+		}
 		return cmd.Run()
 	}
 

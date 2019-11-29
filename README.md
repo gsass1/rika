@@ -1,5 +1,7 @@
 # Rika
 
+![Build Status](https://travis-ci.org/Nuke928/rika.svg?branch=master)
+
 Simple but powerful declarative backups.
 
 

@@ -85,3 +85,5 @@ cd ../../
 echo "Success!"
 
 cleanup
+
+exit 0

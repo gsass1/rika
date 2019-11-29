@@ -577,7 +577,7 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 		return errors.Wrap(err, "failed to run compression cmd")
 	}
 
-	err = cmd.Run()
+	err = cmd.Start()
 	if err != nil {
 		return errors.Wrap(err, "failed to run cmd")
 	}
@@ -586,7 +586,17 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 	go io.Copy(fileWriter, compressStdout)
 	defer fileWriter.Flush()
 
-	return compressCmd.Wait()
+	err = compressCmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (runner *BackupRunner) GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, artifactName *string) error {

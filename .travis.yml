@@ -1,0 +1,15 @@
+language: go
+
+go:
+  - 1.13.x
+env: GO111MODULE=on GOFLAGS='-mod vendor'
+
+services:
+  - docker
+
+before_script:
+  - go build
+
+script:
+  - go test
+  - cd tests && ./run_tests.sh

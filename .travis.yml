@@ -1,12 +1,11 @@
 language: go
 
-env: GO111MODULE=on GOFLAGS='-mod vendor'
+env: GO111MODULE=on
 
 services:
   - docker
 
 before_script:
-  - go mod vendor
   - go build
 
 script:

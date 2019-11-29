@@ -25,11 +25,20 @@ docker run --name test-scp -d -p 2222:22 \
 
 printf "Waiting for SSH server to come online"
 
-until nc -z localhost 2222
-do
-    printf "%c" .
-    sleep 1
+set +e
+
+while true; do
+  ssh -q -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking no" -p 2222 -i keys/test test@localhost exit
+
+  if [ $? -eq 0 ]; then
+    break
+  fi
+
+  printf "."
+  sleep 1
 done
+
+set -e
 
 echo ""
 

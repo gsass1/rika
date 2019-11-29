@@ -23,6 +23,16 @@ docker run --name test-scp -d -p 2222:22 \
   -e SSH_USERS="test:$UID:$UID" \
   docker.io/panubo/sshd:1.1.0 1>/dev/null
 
+printf "Waiting for SSH server to come online"
+
+until nc -z localhost 2222
+do
+    printf "%c" .
+    sleep 1
+done
+
+echo ""
+
 rm -rf volume
 mkdir volume
 

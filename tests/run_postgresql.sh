@@ -5,7 +5,7 @@ set -e
 echo "Starting PostgreSQL container..."
 
 if [ ! "$(docker ps -a  | grep test-postgres)" ]; then
-    ocker run --name test-postgres --health-cmd='pg_isready -U test' -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DATABASE=test -e POSTGRES_ROOT_PASSWORD=test -d postgres:12.1-alpine 1>/dev/null
+    docker run --name test-postgres --health-cmd='pg_isready -U test' -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DATABASE=test -e POSTGRES_ROOT_PASSWORD=test -d postgres:12.1-alpine 1>/dev/null
 else 
     docker start test-postgres 1>/dev/null
 fi

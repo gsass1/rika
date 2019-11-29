@@ -1,0 +1,15 @@
+version: 1
+backup:
+  name: SCP Test
+  dataProviders:
+    volumes:
+    - name: Test Volume
+      path: ./volume
+  storageProviders:
+  - name: SFTP
+    sftp:
+      user: test
+      host: localhost
+      port: 2222
+      path: /scp-data
+      key: ./keys/test

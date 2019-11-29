@@ -9,7 +9,7 @@ Rika allows you to define all of your data providers (databases and volumes) and
 
 ## Example
 
-Locally we have a MySQL Database and one volume, and we want to back thse up on a SFTP server.
+Locally we have a MySQL Database and one volume, and we want to back these up on a SFTP server.
 
 ```yaml
 version: 1

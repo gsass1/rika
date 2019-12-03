@@ -66,8 +66,7 @@ type DumpCommand struct {
 }
 
 type Database interface {
-	//GenerateArtifact(destPath string, artifactName *string) error
-	ConstructDumpCommand() DumpCommand
+	GetDumpCommand() DumpCommand
 }
 
 type DockerDefinition struct {
@@ -156,19 +155,14 @@ const VERSION = 1
 
 func which(file string) (string, error) {
 	bytes, err := exec.Command("which", file).Output()
+	if err != nil {
+		return "", err
+	}
 
 	path := string(bytes)
 	path = strings.TrimSuffix(path, "\n")
 
 	return string(path), err
-
-	// 	var stdout bytes.Buffer
-	// 	cmd.Stdout = &stdout
-
-	// 	err := cmd.Run()
-	// 	if err != nil {
-	// 		return "", err
-	// 	}
 }
 
 func analyzeCompressionDefinition(def *CompressionDefinition) error {
@@ -461,7 +455,7 @@ func (runner *BackupRunner) GetTimestampString() string {
 	return runner.Time.Format("20060102150405")
 }
 
-func (def *MySQLDefinition) ConstructDumpCommand() DumpCommand {
+func (def *MySQLDefinition) GetDumpCommand() DumpCommand {
 	const program = "mysqldump"
 
 	args := []string{"-h", def.Host, "-u", def.User, "-P", strconv.Itoa(def.Port)}
@@ -482,7 +476,7 @@ func (def *MySQLDefinition) ConstructDumpCommand() DumpCommand {
 	}
 }
 
-func (def *PostgreSQLDefinition) ConstructDumpCommand() DumpCommand {
+func (def *PostgreSQLDefinition) GetDumpCommand() DumpCommand {
 	var program string
 
 	args := []string{"-h", def.Host, "-U", def.User, "-p", strconv.Itoa(def.Port)}
@@ -600,7 +594,7 @@ func RunCommandWithCompressedStdout(cmd *exec.Cmd, cdef *CompressionDefinition, 
 }
 
 func (runner *BackupRunner) GenerateDatabaseArtifact(def *DatabaseDefinition, destPath string, artifactName *string) error {
-	dumpCmd := def.Database.ConstructDumpCommand()
+	dumpCmd := def.Database.GetDumpCommand()
 
 	fileName := runner.ConstructArtifactName(def.Name, def.Format, "sql", def.CompressionDefinition.Extension)
 	*artifactName = fileName

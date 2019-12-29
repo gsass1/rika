@@ -17,18 +17,12 @@ import (
 	"github.com/kennygrant/sanitize"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
-
-	"github.com/briandowns/spinner"
 )
 
 var log = logrus.New()
 
 func SetVerbose() {
 	log.SetLevel(logrus.DebugLevel)
-}
-
-func CreateSpinner() *spinner.Spinner {
-	return spinner.New(spinner.CharSets[0], 100*time.Millisecond)
 }
 
 type CompressionDefinition struct {
@@ -703,10 +697,9 @@ func (runner *BackupRunner) Run() error {
 	defer os.RemoveAll(runner.TempPath)
 
 	var artifacts []string
-	spinner := CreateSpinner()
 
 	log.Infof("Generating database artifacts ")
-	spinner.Start()
+
 	for _, db := range runner.Backup.DataProviders.DatabaseDefinitions {
 		var artifactName string
 
@@ -724,10 +717,8 @@ func (runner *BackupRunner) Run() error {
 		}
 	}
 
-	spinner.Stop()
-
 	log.Info("Generating volume artifacts")
-	spinner.Start()
+
 	for _, volume := range runner.Backup.DataProviders.VolumeDefinitions {
 		var artifactName string
 
@@ -746,15 +737,11 @@ func (runner *BackupRunner) Run() error {
 		}
 	}
 
-	spinner.Stop()
-
 	// Store artifacts
 	for _, storage := range runner.Backup.StorageDefinitions {
 		log.WithFields(logrus.Fields{
 			"provider": storage.Name,
 		}).Info("Storing artifacts")
-
-		spinner.Start()
 
 		for _, artifact := range artifacts {
 			artifactFullPath := path.Join(runner.TempPath, artifact)
@@ -763,8 +750,6 @@ func (runner *BackupRunner) Run() error {
 				return errors.Wrapf(err, "failed storing %s", artifact)
 			}
 		}
-
-		spinner.Stop()
 	}
 
 	log.WithFields(logrus.Fields{

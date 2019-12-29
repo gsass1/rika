@@ -3,7 +3,6 @@ module github.com/Nuke928/rika
 go 1.13
 
 require (
-	github.com/briandowns/spinner v1.8.0
 	github.com/kennygrant/sanitize v1.2.4
 	github.com/pkg/errors v0.8.1
 	github.com/sirupsen/logrus v1.4.2

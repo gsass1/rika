@@ -1,38 +1,12 @@
 package main
 
 import (
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
-	"github.com/urfave/cli/v2"
+	"log"
 	"os"
+
+	"github.com/pkg/errors"
+	"github.com/urfave/cli/v2"
 )
-
-// func main() {
-// 	file := "backup.yaml"
-// 	backup, err := ParseBackupFile(file)
-// 	if err != nil {
-// 		log.Fatal(errors.Wrapf(err, "failed reading backup definition '%s'", file))
-// 	}
-
-// 	err = AnalyzeBackupDefinition(backup)
-// 	if err != nil {
-// 		log.Fatal(errors.Wrap(err, "failed analyzing backup"))
-// 	} else {
-// 		log.Println("File format is OK")
-// 	}
-
-// 	log.Println(backup)
-
-// 	runner, err := NewBackupRunner(&backup.Backup)
-// 	if err != nil {
-// 		log.Fatal(errors.Wrap(err, "failed creating backup runner"))
-// 	}
-
-// 	err = runner.Run()
-// 	if err != nil {
-// 		log.Fatal(errors.Wrap(err, "failed running backup"))
-// 	}
-// }
 
 func RunCmd(file string) error {
 	backup, err := ParseBackupFile(file)
@@ -70,7 +44,6 @@ func GetOptions() Options {
 }
 
 func main() {
-	log := logrus.New()
 	app := &cli.App{
 		Name:    "rika",
 		Version: "v0.0.1",

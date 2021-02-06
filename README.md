@@ -79,7 +79,7 @@ More coming soon!
 
 The `compression` key allows you to tune compression.
 
-```
+```yaml
 compression:
   cmd: bzip2
   args: -9
